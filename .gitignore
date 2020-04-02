@@ -1,0 +1,4 @@
+*.pyc
+/poetry.lock
+/src/*.egg-info/
+/dist/
