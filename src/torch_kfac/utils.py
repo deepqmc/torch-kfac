@@ -1,3 +1,8 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
 def flatten_or_unsqueeze(x, start_dim=0, end_dim=-1):
     if end_dim < 0:
         end_dim = len(x.shape) + end_dim
