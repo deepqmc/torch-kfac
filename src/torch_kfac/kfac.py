@@ -92,11 +92,15 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
         self.state['precond'] = precond
         self.state['global_precond'] = global_precond
 
-    def step_update(self, grad_weight=None):
+    def _iter_groups(self):
         for group in self.param_groups:
             group_id = group['params'][0]
             state = self.state[group_id]
             handler = self._handlers[group_id]
+            yield group, handler, state
+
+    def step_update(self, grad_weight=None):
+        for group, handler, state in self._iter_groups():
             state['k'] = state.get('k', 0) + 1
             handler.update_fisher(group, state, grad_weight=grad_weight)
             handler.update_inverse(group, state)
@@ -104,18 +108,12 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
     def step_precondition(self):
         if not self.state['precond']:
             return
-        for group in self.param_groups:
-            group_id = group['params'][0]
-            state = self.state[group_id]
-            handler = self._handlers[group_id]
+        for group, handler, state in self._iter_groups():
             handler.precondition(group, state)
 
     def step_rescale(self):
         fnorms, gnorms = [], []
-        for i, group in enumerate(self.param_groups):
-            group_id = group['params'][0]
-            state = self.state[group_id]
-            handler = self._handlers[group_id]
+        for i, (group, handler, state) in enumerate(self._iter_groups()):
             fn, gnorm = handler.norms(group, state)
             fnorm = ((fn - fn.mean()) ** 2).mean()
             log.debug(f'{group.get("name", i)}: KL: {fnorm}, Δℒ: {-gnorm}')
