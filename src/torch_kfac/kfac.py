@@ -1,15 +1,12 @@
-import logging
 from contextlib import AbstractContextManager, contextmanager
 
 import torch
 from torch.optim.optimizer import Optimizer
 
-from .handlers import KFACEmbedding, KFACLinearFactored
-
-log = logging.getLogger(__name__)
+from .handlers import KFACEmbedding, KFACLinearFactored, KFACLinearFull
 
 
-class ModuleTracker:
+class ModuleTracker(AbstractContextManager):
     def __init__(self):
         self._handlers = {}
 
@@ -41,21 +38,27 @@ class ModuleTracker:
         self.close()
 
 
-class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
+class KFAC(Optimizer, ModuleTracker):
     def __init__(
         self,
         modules,
+        lr,
         damping,
-        norm_constraint,
         cov_ema_decay=0.95,
+        norm_constraint=None,
+        update_cov_manually=False,
         centered_cov=False,
-        precond=True,
-        global_precond=False,
         handler_factories=None,
+        exact_norm=False,
+        exact_fisher_linear=False,
     ):
         if handler_factories is None:
-            handler_factories = [KFACLinearFactored, KFACEmbedding]
+            handler_factories = [
+                KFACLinearFull if exact_fisher_linear else KFACLinearFactored,
+                KFACEmbedding,
+            ]
         defaults = {
+            'lr': lr,
             'damping': damping,
             'cov_ema_decay': cov_ema_decay,
             'centered_cov': centered_cov,
@@ -89,8 +92,8 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
             self._handlers[params[0]] = factories[mod_class](mod)
         super().__init__(param_groups, defaults)
         self.state['norm_constraint'] = norm_constraint
-        self.state['precond'] = precond
-        self.state['global_precond'] = global_precond
+        self.state['exact_norm'] = exact_norm
+        self.state['update_cov_manually'] = update_cov_manually
 
     def _iter_groups(self):
         for group in self.param_groups:
@@ -99,62 +102,36 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
             handler = self._handlers[group_id]
             yield group, handler, state
 
-    def step_update(self):
+    def step_update_cov(self):
         for group, handler, state in self._iter_groups():
             state['k'] = state.get('k', 0) + 1
             handler.update_fisher(group, state)
             handler.update_inverse(group, state)
 
+    update_cov = step_update_cov
+
     def step_precondition(self):
-        if not self.state['precond']:
-            return
         for group, handler, state in self._iter_groups():
             handler.precondition(group, state)
 
-    def step_rescale(self):
-        fnorms, gnorms = [], []
-        for i, (group, handler, state) in enumerate(self._iter_groups()):
-            fn, gnorm = handler.norms(group, state)
-            fnorm = ((fn - fn.mean()) ** 2).mean()
-            log.debug(f'{group.get("name", i)}: KL: {fnorm}, Δℒ: {-gnorm}')
-            fnorms.append(fn)
-            gnorms.append(gnorm)
-        gnorms = torch.stack(gnorms)
-        gnorm = -gnorms.sum()
-        fnorms = torch.stack(fnorms, dim=-1)
-        fnorms = fnorms - fnorms.mean(dim=0)
-        fnorm = (fnorms.sum(dim=-1) ** 2).mean()
-        log.debug(f'total: KL: {fnorm}, Δℒ: {gnorm}')
-        scale = (self.state['norm_constraint'] / fnorm).sqrt()
-        if scale < 1:
-            for param in self.parameters():
-                param.grad.detach().copy_(scale * param.grad)
-            fnorms, gnorms = scale * fnorms, scale * gnorms
-            fnorm, gnorm = scale ** 2 * fnorm, scale * gnorm
-            log.debug(f'total: KL: {fnorm}, Δℒ: {gnorm}')
-        if self.state['global_precond']:
-            F = fnorms.t() @ fnorms / len(fnorms)
-            scales = F.inverse() @ gnorms
-            for scale, group in zip(scales, self.param_groups):
-                for param in group['params']:
-                    param.grad.detach().copy_(scale * param.grad)
-            fnorms, gnorms = scales * fnorms, scales * gnorms
-            fnorm = (fnorms.sum(dim=-1) ** 2).mean()
-            gnorm = -gnorms.sum()
-            log.debug(f'total: KL: {fnorm}, Δℒ: {gnorm}')
-            scale = (self.state['norm_constraint'] / fnorm).sqrt()
-            if scale < 1:
-                for param in self.parameters():
-                    param.grad.detach().copy_(scale * param.grad)
-                fnorm, gnorm = scale ** 2 * fnorm, scale * gnorm
-                log.debug(f'total: KL: {fnorm}, Δℒ: {gnorm}')
-        return fnorm, gnorm
-
     def step(self):
-        self.step_update()
+        if not self.state['update_cov_manually']:
+            self.step_update_cov()
         self.step_precondition()
-        return self.step_rescale()
-
-    def parameters(self):
+        if self.state['norm_constraint']:
+            fnorms, gnorms = [], []
+            for group, handler, state in self._iter_groups():
+                fnorm, gnorm = handler.norms(group, state)
+                fnorms.append(fnorm * group['lr'] ** 2)
+                gnorms.append(gnorm * group['lr'] ** 2)
+            gnorms = torch.stack(gnorms)
+            gnorm = gnorms.sum()
+            fnorms = torch.stack(fnorms)
+            fnorm = fnorms.sum()
+            norm = fnorm if self.state['exact_norm'] else gnorm
+            epsilon = min(1, (self.state['norm_constraint'] / norm).sqrt())
+        else:
+            epsilon = 1.0
         for group in self.param_groups:
-            yield from group['params']
+            for p in group['params']:
+                p.detach().add_(-epsilon * group['lr'] * p.grad.detach())
