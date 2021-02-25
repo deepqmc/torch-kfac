@@ -27,7 +27,9 @@ def bincount_3d1(inp, weights, minlength=0):
     idx = torch.arange(m * N * D, device=inp.device).view(m * N, D)
     offset = torch.arange(0, m * N, m, device=inp.device)
     return torch.bincount(
-        idx[inp + offset[:, None]].flatten(), weights.flatten(), minlength=N * m * D,
+        idx[inp + offset[:, None]].flatten(),
+        weights.flatten(),
+        minlength=N * m * D,
     ).view(N, m, D)
 
 
