@@ -99,10 +99,10 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
             handler = self._handlers[group_id]
             yield group, handler, state
 
-    def step_update(self, grad_weight=None):
+    def step_update(self):
         for group, handler, state in self._iter_groups():
             state['k'] = state.get('k', 0) + 1
-            handler.update_fisher(group, state, grad_weight=grad_weight)
+            handler.update_fisher(group, state)
             handler.update_inverse(group, state)
 
     def step_precondition(self):
@@ -150,8 +150,8 @@ class KFAC(Optimizer, ModuleTracker, AbstractContextManager):
                 log.debug(f'total: KL: {fnorm}, Δℒ: {gnorm}')
         return fnorm, gnorm
 
-    def step(self, grad_weight=None):
-        self.step_update(grad_weight=grad_weight)
+    def step(self):
+        self.step_update()
         self.step_precondition()
         return self.step_rescale()
 

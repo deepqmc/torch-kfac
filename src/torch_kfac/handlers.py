@@ -37,7 +37,7 @@ class KFACModuleHandler(ABC):
     mod_class = None
 
     @abstractmethod
-    def update_fisher(self, group, state, grad_weight=None):
+    def update_fisher(self, group, state):
         pass
 
     @abstractmethod
@@ -81,7 +81,7 @@ class KFACModuleHandler(ABC):
 class KFACEmbedding(KFACModuleHandler):
     mod_class = 'Embedding'
 
-    def update_fisher(self, group, state, grad_weight=None):
+    def update_fisher(self, group, state):
         idx = [idx for (idx,) in self._buffer.pop('input')]
         g = [g for (g,) in reversed(self._buffer.pop('grad_output'))]
         # bs = idx[0].shape[0]  # batch size
@@ -92,8 +92,6 @@ class KFACEmbedding(KFACModuleHandler):
         debug('g shapes', [x.shape for x in g])
         idx = torch.cat([idx.flatten(start_dim=1) for idx in idx], dim=1)
         g = torch.cat([flatten_or_unsqueeze(g, 1, -2) for g in g], dim=1)
-        if grad_weight is not None:
-            g = g / grad_weight[:, None, None]
         dW = bincount_3d1(idx, g, minlength=len(group['params'][0]))
         state['dW'] = dW
         if group['centered_cov']:
@@ -136,7 +134,7 @@ class KFACLinearHandler(KFACModuleHandler):
     def precondition_linear(self, group, state, grad):
         pass
 
-    def update_fisher(self, group, state, grad_weight=None):
+    def update_fisher(self, group, state):
         a = [a for (a,) in self._buffer.pop('input')]
         g = [g for (g,) in reversed(self._buffer.pop('grad_output'))]
         assert len(a) == len(g)
@@ -146,8 +144,6 @@ class KFACLinearHandler(KFACModuleHandler):
         debug('g shapes', [x.shape for x in g])
         a = torch.cat([flatten_or_unsqueeze(a, 1, -2) for a in a], dim=1)
         g = torch.cat([flatten_or_unsqueeze(g, 1, -2) for g in g], dim=1)
-        if grad_weight is not None:
-            g = g / grad_weight[:, None, None]
         debug('a shape', a.shape, 'g shape', g.shape)
         debug('a mean/std', a.mean(dim=(0, 1)), a.std(dim=(0, 1)))
         debug('g mean/std', g.mean(dim=(0, 1)), g.std(dim=(0, 1)))
