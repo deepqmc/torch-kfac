@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager, contextmanager
 import torch
 from torch.optim.optimizer import Optimizer
 
-from .handlers import KFACEmbedding, KFACLinearFactored, KFACLinearFull
+from .handlers import KFACLinearFactored
 
 
 class ModuleTracker(AbstractContextManager):
@@ -44,7 +44,7 @@ class ModuleTracker(AbstractContextManager):
 class KFAC(Optimizer, ModuleTracker):
     def __init__(
         self,
-        modules,
+        named_modules,
         lr,
         damping,
         cov_ema_decay=0.95,
@@ -55,33 +55,27 @@ class KFAC(Optimizer, ModuleTracker):
         exact_norm=False,
         exact_fisher_linear=False,
     ):
-        if handler_factories is None:
-            handler_factories = [
-                KFACLinearFull if exact_fisher_linear else KFACLinearFactored,
-                KFACEmbedding,
-            ]
+        handler_factories = {'Linear': KFACLinearFactored, **(handler_factories or {})}
         defaults = {
             'lr': lr,
             'damping': damping,
             'cov_ema_decay': cov_ema_decay,
             'centered_cov': centered_cov,
         }
-        factories = {f.mod_class: f for f in handler_factories}
         self._handlers = {}
         param_groups = []
-        for mod in list(modules):
-            if isinstance(mod, tuple):
-                mod_name, mod = mod
-            else:
-                mod_name = None
+        for mod_name, mod in list(named_modules):
             mod_class = mod.__class__.__name__
-            if mod_class not in factories:
+            if mod_class not in handler_factories:
                 for name, param in mod.named_parameters(recurse=False):
                     if param.requires_grad:
                         raise ValueError(
-                            f'{mod_name or mod_class}.{name} requires '
+                            f'{mod_name}.{name} of type {mod_class} requires '
                             'gradient but no handler factory'
                         )
+                continue
+            factory = handler_factories[mod_class]
+            if factory is None:
                 continue
             params = list(mod.parameters(recurse=False))
             grad_requirements = [p.requires_grad for p in params]
@@ -92,7 +86,7 @@ class KFAC(Optimizer, ModuleTracker):
             if mod_name:
                 group['name'] = mod_name
             param_groups.append(group)
-            self._handlers[params[0]] = factories[mod_class](mod)
+            self._handlers[params[0]] = factory(mod)
         super().__init__(param_groups, defaults)
         self.state['norm_constraint'] = norm_constraint
         self.state['exact_norm'] = exact_norm
