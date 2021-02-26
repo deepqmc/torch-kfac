@@ -45,15 +45,15 @@ class KFAC(Optimizer, ModuleTracker):
     def __init__(
         self,
         named_modules,
+        handler_factories=None,
+        update_cov_manually=False,
+        *,
         lr,
         damping,
         cov_ema_decay=0.95,
         norm_constraint=None,
-        update_cov_manually=False,
         centered_cov=False,
-        handler_factories=None,
         exact_norm=False,
-        exact_fisher_linear=False,
     ):
         handler_factories = {'Linear': KFACLinearFactored, **(handler_factories or {})}
         defaults = {
