@@ -72,7 +72,7 @@ class KFACLinearFull(KFACLinearHandler):
         if len(group['params']) == 2:
             a = F.pad(a, (0, 1), value=1)
         dW = a[:, :, None, :] * g[:, :, :, None]
-        dW = dW.mean(dim=1)
+        dW = dW.mean(dim=1) if group['average_loc'] else dW.flatten(end_dim=1)
         if group['centered_cov']:
             dW = dW - dW.mean(dim=0)
         state['dW'] = dW
@@ -98,8 +98,11 @@ class KFACLinearFactored(KFACLinearHandler):
             g = g - g.mean(dim=(0, 1))
         if len(group['params']) == 2:
             a = F.pad(a, (0, 1), value=1)
-        state['a'] = a = a.mean(dim=1)
-        state['g'] = g = g.mean(dim=1)
+        if group['average_loc']:
+            a, g = a.mean(dim=1), g.mean(dim=1)
+        else:
+            a, g = a.flatten(end_dim=1), g.flatten(end_dim=1)
+        state['a'], state['g'] = a, g
         state['A'] = updated_ewm_average(
             state.get('A'), a.t() @ a / len(a), group['cov_ema_decay'], state['k']
         )
