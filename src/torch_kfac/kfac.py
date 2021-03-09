@@ -55,6 +55,7 @@ class KFAC(Optimizer, ModuleTracker):
         centered_cov=False,
         exact_norm=False,
         average_loc=False,
+        max_pi=1000.0,
     ):
         handler_factories = {'Linear': KFACLinearFactored, **(handler_factories or {})}
         defaults = {
@@ -63,6 +64,7 @@ class KFAC(Optimizer, ModuleTracker):
             'cov_ema_decay': cov_ema_decay,
             'centered_cov': centered_cov,
             'average_loc': average_loc,
+            'max_pi': max_pi,
         }
         self._handlers = {}
         param_groups = []

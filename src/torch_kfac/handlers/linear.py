@@ -113,6 +113,8 @@ class KFACLinearFactored(KFACLinearHandler):
     def update_inverse(self, group, state):
         A, G = state['A'], state['G']
         pi = torch.sqrt((A.trace() / A.shape[0]) / (G.trace() / G.shape[0]))
+        if group['max_pi']:
+            pi = torch.minimum(pi, pi.new_tensor(group['max_pi']))
         sqrt_lam = sqrt(group['damping'])
         A = A + torch.diag(A.new_full((A.shape[0],), sqrt_lam * pi))
         G = G + torch.diag(G.new_full((G.shape[0],), sqrt_lam / pi))
