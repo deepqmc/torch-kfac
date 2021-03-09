@@ -94,10 +94,8 @@ class KFACLinearFull(KFACLinearHandler):
 class KFACLinearFactored(KFACLinearHandler):
     def update_fisher_linear(self, group, state, a, g):
         if group['centered_cov']:
-            if a.shape[-1] > 1:
-                a = a - a.mean(dim=(0, 1))
-            if g.shape[-1] > 1:
-                g = g - g.mean(dim=(0, 1))
+            a = a - a.mean(dim=(0, 1))
+            g = g - g.mean(dim=(0, 1))
         if len(group['params']) == 2:
             a = F.pad(a, (0, 1), value=1)
         state['a'] = a = a.mean(dim=1)
